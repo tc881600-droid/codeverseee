@@ -1,0 +1,50 @@
+# CodeVerse Docker Execution Stack
+# ---------------------------------
+# Run: docker compose up --build
+#
+# This builds:
+#   1. codeverse/sandbox  — multi-language execution sandbox (all 13 compilers)
+#   2. codeverse/server   — Node.js execution API server
+#
+# The server listens on port 3001. Point your frontend at it via
+# VITE_CODE_EXECUTION_URL=http://localhost:3001
+
+version: "3.9"
+
+services:
+  # ── Sandbox image (multi-language compilers) ──
+  sandbox-builder:
+    build:
+      context: .
+      dockerfile: Dockerfile.sandbox
+    image: codeverse/sandbox:latest
+    # This service doesn't run — it just builds the image.
+    # The execution server spawns containers from this image on demand.
+    command: ["echo", "Sandbox image built successfully"]
+
+  # ── Execution API server ──
+  server:
+    build:
+      context: ../server
+      dockerfile: Dockerfile
+    image: codeverse/server:latest
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - SANDBOX_IMAGE=codeverse/sandbox:latest
+      - WORKSPACE_BASE=/tmp/codeverse-workspaces
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - workspace-data:/tmp/codeverse-workspaces
+    depends_on:
+      - sandbox-builder
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "2"
+
+volumes:
+  workspace-data:

@@ -1,0 +1,399 @@
+// CodeVerse — production schema
+// Maps 1:1 to the local adapter store in src/lib/db.ts. The local adapter persists
+// this exact shape to localStorage; swapping to Postgres means replacing the adapter
+// internals in src/lib/services.ts + src/lib/db.ts — call sites stay untouched.
+//
+// Run: prisma migrate dev --name init && prisma db seed
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum Verdict {
+  ACCEPTED
+  FAILED
+  INCONCLUSIVE
+}
+
+enum PostKind {
+  QUESTION
+  SHARE
+  DISCUSSION
+}
+
+enum NotifKind {
+  ACHIEVEMENT
+  CHALLENGE
+  COMMUNITY
+  SYSTEM
+  COURSE
+  MILESTONE
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  username  String   @unique
+  role      Role     @default(USER)
+  suspended Boolean  @default(false)
+  provider  String   @default("local") // local | supabase
+  createdAt DateTime @default(now())
+
+  profile       Profile?
+  lessonProgress LessonProgress[]
+  submissions   Submission[]
+  taskProgress  ProjectTaskProgress[]
+  achievements  UserAchievement[]
+  streak        Streak?
+  snippets      Snippet[]
+  posts         CommunityPost[]
+  comments      PostComment[]
+  likes         PostLike[]
+  bookmarks     PostBookmark[]
+  reports       PostReport[]
+  notifications Notification[]
+  executions    ExecutionLog[]
+
+  @@index([createdAt])
+}
+
+model Profile {
+  userId      String @id
+  displayName String
+  title       String @default("")
+  bio         String @default("")
+  hue         Int    @default(160)
+  user        User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Language {
+  slug      String  @id
+  name      String  @unique
+  short     String
+  color     String
+  tagline   String
+  paradigms String[]
+  firstYear Int
+  version   String
+  extension String
+  monaco    String
+  enabled   Boolean @default(true)
+  usage     Int     @default(50)
+  courses   Course[]
+  lessons   Lesson[]
+  challenges Challenge[]
+  projects  Project[]
+}
+
+model Course {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  languageSlug String
+  title       String
+  level       String   @default("Beginner")
+  description String
+  hue         Int      @default(200)
+  published   Boolean  @default(true)
+  skills      String[]
+  createdAt   DateTime @default(now())
+
+  language Language @relation(fields: [languageSlug], references: [slug])
+  lessons  Lesson[]
+  progress CourseProgress[]
+
+  @@index([languageSlug])
+  @@index([published])
+}
+
+model Lesson {
+  id         String @id @default(cuid())
+  courseId   String
+  languageSlug String
+  module     String
+  order      Int
+  title      String
+  minutes    Int
+  xp         Int
+  summary    String
+  sections   Json // LessonSection[] — content moves to rich text in v2
+  exercise   Json?
+  takeaways  String[]
+
+  course   Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  language Language @relation(fields: [languageSlug], references: [slug])
+  progress LessonProgress[]
+
+  @@unique([courseId, order])
+  @@index([courseId])
+}
+
+model LessonProgress {
+  userId   String
+  lessonId String
+  xp       Int
+  runs     Int      @default(0)
+  at       DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@id([userId, lessonId])
+}
+
+model CourseProgress {
+  userId     String
+  courseId   String
+  completedAt DateTime @default(now())
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  @@id([userId, courseId])
+}
+
+model Challenge {
+  id          String     @id @default(cuid())
+  slug        String     @unique
+  languageSlug String
+  title       String
+  difficulty  Difficulty
+  category    String
+  tags        String[]
+  points      Int
+  description String[]
+  constraints String[]
+  starter     String
+  fnName      String
+  tests       Json // ChallengeTest[] — hidden flag never sent to client
+  published   Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+
+  language    Language     @relation(fields: [languageSlug], references: [slug])
+  submissions Submission[]
+
+  @@index([languageSlug, published])
+  @@index([difficulty])
+}
+
+model Submission {
+  id          String   @id @default(cuid())
+  userId      String
+  challengeId String
+  language    String
+  code        String
+  passed      Int
+  total       Int
+  verdict     Verdict
+  simulated   Boolean  @default(false)
+  ms          Int
+  at          DateTime @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challenge Challenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+
+  @@index([userId, at])
+  @@index([challengeId])
+}
+
+model Project {
+  id          String @id @default(cuid())
+  slug        String @unique
+  languageSlug String
+  title       String
+  level       String
+  hours       Int
+  description String
+  outcomes    String[]
+  hue         Int    @default(200)
+
+  language Language        @relation(fields: [languageSlug], references: [slug])
+  tasks    ProjectTask[]
+}
+
+model ProjectTask {
+  id        String  @id @default(cuid())
+  projectId String
+  title     String
+  desc      String
+  xp        Int
+  order     Int     @default(0)
+
+  project  Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  progress ProjectTaskProgress[]
+
+  @@index([projectId])
+}
+
+model ProjectTaskProgress {
+  userId String
+  taskId String
+  at     DateTime @default(now())
+
+  user User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task ProjectTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@id([userId, taskId])
+}
+
+model Achievement {
+  id        String @id
+  name      String @unique
+  desc      String
+  icon      String
+  metric    String // lessons | challenges | xp | streak | runs | languages | snippets | posts | tasks | courses
+  threshold Int
+
+  holders UserAchievement[]
+}
+
+model UserAchievement {
+  userId        String
+  achievementId String
+  unlockedAt    DateTime @default(now())
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@id([userId, achievementId])
+}
+
+model Streak {
+  userId  String @id
+  current Int    @default(0)
+  best    Int    @default(0)
+  lastDay String // YYYY-MM-DD
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Snippet {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  language  String
+  stdin     String   @default("")
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  user  User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  files SnippetFile[]
+
+  @@index([userId, updatedAt])
+}
+
+model SnippetFile {
+  id        String  @id @default(cuid())
+  snippetId String
+  name      String
+  content   String
+  snippet   Snippet @relation(fields: [snippetId], references: [id], onDelete: Cascade)
+
+  @@index([snippetId])
+}
+
+model CommunityPost {
+  id       String   @id @default(cuid())
+  authorId String
+  kind     PostKind @default(DISCUSSION)
+  title    String
+  body     String
+  tags     String[]
+  at       DateTime @default(now())
+
+  author    User           @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  comments  PostComment[]
+  likes     PostLike[]
+  bookmarks PostBookmark[]
+  reports   PostReport[]
+
+  @@index([authorId])
+  @@index([at])
+}
+
+model PostComment {
+  id       String   @id @default(cuid())
+  postId   String
+  authorId String
+  body     String
+  at       DateTime @default(now())
+
+  post   CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+}
+
+model PostLike {
+  userId String
+  postId String
+  at     DateTime @default(now())
+  user   User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post   CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  @@id([userId, postId])
+}
+
+model PostBookmark {
+  userId String
+  postId String
+  at     DateTime @default(now())
+  user   User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post   CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  @@id([userId, postId])
+}
+
+model PostReport {
+  id       String   @id @default(cuid())
+  postId   String
+  byId     String
+  reason   String
+  at       DateTime @default(now())
+  resolved Boolean  @default(false)
+
+  post CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  by   User          @relation(fields: [byId], references: [id], onDelete: Cascade)
+
+  @@index([resolved])
+}
+
+model Notification {
+  id     String    @id @default(cuid())
+  userId String
+  kind   NotifKind
+  title  String
+  body   String
+  at     DateTime  @default(now())
+  read   Boolean   @default(false)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read, at])
+}
+
+model ExecutionLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  language  String
+  status    String
+  simulated Boolean  @default(false)
+  ms        Int
+  at        DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([at])
+  @@index([language])
+  @@index([status])
+}

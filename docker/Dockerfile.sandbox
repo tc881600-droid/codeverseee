@@ -1,0 +1,91 @@
+# Multi-language execution sandbox for CodeVerse
+# Contains all compilers and runtimes for the 13 supported languages
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install base dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    gnupg \
+    software-properties-common \
+    ca-certificates \
+    build-essential \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python 3.12
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js 20 (for JavaScript/TypeScript)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && \
+    npm install -g typescript && \
+    rm -rf /var/lib/apt/lists/*
+
+# Go 1.23
+RUN wget -q https://go.dev/dl/go1.23.0.linux-amd64.tar.gz && \
+    tar -C /usr/local -xzf go1.23.0.linux-amd64.tar.gz && \
+    rm go1.23.0.linux-amd64.tar.gz
+ENV PATH="/usr/local/go/bin:${PATH}"
+
+# Rust 1.82
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Java 21 (OpenJDK)
+RUN apt-get update && apt-get install -y \
+    openjdk-21-jdk-headless \
+    && rm -rf /var/lib/apt/lists/*
+
+# C/C++ (GCC is already installed via build-essential)
+# Additional C++ tools
+RUN apt-get update && apt-get install -y \
+    gdb \
+    valgrind \
+    && rm -rf /var/lib/apt/lists/*
+
+# PHP 8.3
+RUN apt-get update && apt-get install -y \
+    php-cli \
+    && rm -rf /var/lib/apt/lists/*
+
+# Kotlin 2.0
+RUN wget -q https://github.com/JetBrains/kotlin/releases/download/v2.0.0/kotlin-compiler-2.0.0.zip && \
+    unzip kotlin-compiler-2.0.0.zip -d /opt && \
+    rm kotlin-compiler-2.0.0.zip
+ENV PATH="/opt/kotlinc/bin:${PATH}"
+
+# Dart 3.5
+RUN wget -qO- https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/dart.gpg && \
+    echo 'deb [signed-by=/usr/share/keyrings/dart.gpg arch=amd64] https://storage.googleapis.com/download.dartlang.org/linux/debian stable main' | tee /etc/apt/sources.list.d/dart_stable.list && \
+    apt-get update && apt-get install -y dart && \
+    rm -rf /var/lib/apt/lists/*
+ENV PATH="/usr/lib/dart/bin:${PATH}"
+
+# SQLite3
+RUN apt-get update && apt-get install -y \
+    sqlite3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user for execution
+RUN useradd -m -s /bin/bash executor
+WORKDIR /home/executor
+
+# Create execution directory
+RUN mkdir -p /workspace && chown executor:executor /workspace
+WORKDIR /workspace
+
+# Copy execution wrapper
+COPY executor.sh /usr/local/bin/executor.sh
+RUN chmod +x /usr/local/bin/executor.sh
+
+# Switch to non-root user
+USER executor
+
+# Default command
+CMD ["/usr/local/bin/executor.sh"]
